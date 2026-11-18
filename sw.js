@@ -1,5 +1,5 @@
 // Offline support: network first, fall back to cache. Your money data is NOT here — it stays in localStorage.
-const CACHE = 'htbam-v1';
+const CACHE = 'htbam-v1.1';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

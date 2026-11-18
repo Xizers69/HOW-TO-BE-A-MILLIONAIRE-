@@ -73,7 +73,10 @@
       nextAllowance: '',
       dailyBudget: 0,
       monthlyTarget: 0,
-      yearlyTarget: 0
+      yearlyTarget: 0,
+      goalName: '',
+      goalAmount: 0,
+      goalDate: ''
     },
     tx: [],
     commitments: []
@@ -223,10 +226,12 @@
     const startedThisMonth = sd.getFullYear() === y && sd.getMonth() === m;
     const allowanceThisMonth = startedThisMonth ? M * (D - sd.getDate() + 1) / D : M;
     const expRemIncomeMonth = Math.max(0, allowanceThisMonth - mo.allowance);
+    // Same idea for the monthly target: in your first (partial) month, only the matching share applies
+    const monthTargetEff = r2(startedThisMonth ? (Number(s.monthlyTarget) || 0) * (D - sd.getDate() + 1) / D : (Number(s.monthlyTarget) || 0));
 
     // --- Month projection
     const monthProj = mo.inc + expRemIncomeMonth - mo.exp - avg.avg * daysAfterToday - remCommitMonth;
-    const monthPerDayForTarget = (mo.inc + expRemIncomeMonth - (mo.exp - today.disc) - remCommitMonth - s.monthlyTarget) / (daysAfterToday + 1);
+    const monthPerDayForTarget = (mo.inc + expRemIncomeMonth - (mo.exp - today.disc) - remCommitMonth - monthTargetEff) / (daysAfterToday + 1);
 
     // --- Year projection
     const monthsLeftAfterThis = 11 - m;
@@ -246,14 +251,14 @@
     const commitBeforeUntil = commitmentsDueBetween(t, until);
     const cashPerDay = (cashStartToday - commitBeforeUntil) / daysUntil;
     const candidates = [{ v: cashPerDay, why: `your cash spread over ${daysUntil} day${daysUntil > 1 ? 's' : ''} until ${untilLabel}` }];
-    if (s.monthlyTarget > 0) candidates.push({ v: monthPerDayForTarget, why: `what still lets you hit your monthly target of ${fmt(s.monthlyTarget)}` });
+    if (monthTargetEff > 0) candidates.push({ v: monthPerDayForTarget, why: `what still lets you hit your monthly target of ${fmt(monthTargetEff)}${startedThisMonth ? ' (adjusted for your first part-month)' : ''}` });
     if (budget > 0) candidates.push({ v: budget, why: 'your daily budget' });
     candidates.sort((a, b) => a.v - b.v);
     const safe = Math.max(0, candidates[0].v);
     const leftToday = safe - today.disc;
 
     return {
-      t, y, m, day, D, budget, today, mo, yr, bal, avg,
+      t, y, m, day, D, budget, monthTargetEff, startedThisMonth, today, mo, yr, bal, avg,
       daysAfterToday, daysLeftYear, remCommitMonth, expRemIncomeMonth, monthsLeftAfterThis,
       monthProj, monthPerDayForTarget, yearProj,
       safe, leftToday, safeWhy: candidates[0].why, cashPerDay, daysUntil, untilLabel, commitBeforeUntil, cashStartToday,
@@ -319,6 +324,8 @@
         </div>
       </div>
 
+      ${targetsCard(a)}
+
       <div class="card">
         <h3>Safe to spend today</h3>
         <div class="row"><div class="big ${a.leftToday < 0 ? 'neg' : 'pos'}">${a.leftToday < 0 ? '−' : ''}${fmt(a.leftToday)}</div><div class="small muted" style="text-align:right">left of ${fmt(a.safe)}<br>spent ${fmt(a.today.disc)}</div></div>
@@ -330,7 +337,7 @@
       <div class="card">
         <h3>Where you're heading</h3>
         ${s.dailyBudget > 0 ? projBox(a.dayLeft, `Today vs daily budget ${fmt(a.budget)}`, '', ['under budget', 'over budget']) : ''}
-        ${projBox(a.monthProj, `End of ${MONTHS_FULL[a.m]} (estimate)`, s.monthlyTarget > 0 ? targetLine(a.monthProj, s.monthlyTarget) : '')}
+        ${projBox(a.monthProj, `End of ${MONTHS_FULL[a.m]} (estimate)`, a.monthTargetEff > 0 ? targetLine(a.monthProj, a.monthTargetEff) : '')}
         ${projBox(a.yearProj, `End of ${a.y} (estimate)`, s.yearlyTarget > 0 ? targetLine(a.yearProj, s.yearlyTarget) : '')}
         <div class="hint">Estimates use your average daily spending (${fmt(a.avg.avg)}/day${a.avg.guessed ? ', from your budget until you log more' : ''}) and your expected allowance.</div>
       </div>
@@ -345,6 +352,73 @@
   function targetLine(proj, target) {
     const gap = proj - target;
     return gap >= 0 ? `✅ Beats target ${fmt(target)} by ${fmt(gap)}` : `🎯 ${fmt(-gap)} short of target ${fmt(target)}`;
+  }
+
+  function goalInfo(a) {
+    const s = state.settings;
+    const G = Number(s.goalAmount) || 0;
+    if (!G) return null;
+    const have = a.bal.worth;
+    const left = G - have;
+    const pct = Math.max(0, Math.min(100, (have / G) * 100));
+    let perMonth = null, perDay = null, daysLeft = null;
+    if (s.goalDate && s.goalDate > a.t) {
+      daysLeft = diffDays(a.t, s.goalDate);
+      perDay = Math.max(0, left) / daysLeft;
+      perMonth = perDay * 30.44;
+    }
+    return { G, have, left, pct, perMonth, perDay, daysLeft };
+  }
+
+  function targetsCard(a) {
+    const s = state.settings;
+    const g = goalInfo(a);
+    const none = !s.dailyBudget && !s.monthlyTarget && !s.yearlyTarget && !g;
+    const tRow = (label, val, actual, hit) => `<div class="row"><span>${label}</span><span>${val ? `<b>${fmt(val)}</b>${actual != null ? ` <span class="pill ${hit ? 'pos' : 'neg'}">${hit ? '✅' : '🎯'} ${fmtS(actual)}</span>` : ''}` : '<span class="muted">not set</span>'}</span></div>`;
+    return `<div class="card">
+      <div class="row"><h3 style="margin:0">🎯 My targets</h3><button class="linkbtn" data-open="targets">${none ? 'Set targets' : 'Edit'} →</button></div>
+      <div style="height:8px"></div>
+      ${tRow('Daily spending budget', s.dailyBudget, null)}
+      ${tRow('Save this month' + (a.startedThisMonth && s.monthlyTarget ? ' <span class="muted small">(first month: ' + fmt(a.monthTargetEff) + ')</span>' : ''), s.monthlyTarget, a.mo.net, a.mo.net >= a.monthTargetEff)}
+      ${tRow('Save this year', s.yearlyTarget, a.yr.net, a.yr.net >= s.yearlyTarget)}
+      ${g ? `<div style="margin-top:12px">
+        <div class="row"><span>🏆 <b>${esc(s.goalName || 'My goal')}</b></span><b>${fmt(g.have)} / ${fmt(g.G)}</b></div>
+        <div class="bar"><i style="width:${g.pct}%;background:var(--green)"></i></div>
+        <div class="hint">${g.left <= 0 ? '🎉 Goal reached!' : `${g.pct.toFixed(1)}% there · ${fmt(g.left)} to go${g.perMonth != null ? ` · save ${fmt(g.perMonth)}/month (${fmt(g.perDay)}/day) to reach it by ${prettyDate(s.goalDate)}` : ''}`}</div>
+      </div>` : `<div class="hint" style="margin-top:8px">Tip: set a big goal (e.g. RM 10,000) to track progress toward it.</div>`}
+    </div>`;
+  }
+
+  function openTargets() {
+    const s = state.settings;
+    const rec = recommended();
+    openSheet(`
+      <h2>🎯 Set your targets</h2>
+      <label class="f"><span>Daily spending budget (RM) — max to spend per day</span>
+        <input type="number" inputmode="decimal" id="t_daily" value="${s.dailyBudget || ''}" placeholder="${rec.daily}">
+        <div class="hint">Recommended: ${fmt(rec.daily)}</div></label>
+      <label class="f"><span>Monthly target (RM) — money left over at month end</span>
+        <input type="number" inputmode="decimal" id="t_month" value="${s.monthlyTarget || ''}" placeholder="${rec.monthly}">
+        <div class="hint">Recommended: ${fmt(rec.monthly)} (20% of allowance)</div></label>
+      <label class="f"><span>Yearly target (RM)</span>
+        <input type="number" inputmode="decimal" id="t_year" value="${s.yearlyTarget || ''}" placeholder="${rec.yearly}">
+        <div class="hint">Recommended: ${fmt(rec.yearly)}</div></label>
+      <button class="btn secondary" id="t_rec">Fill in recommended</button>
+      <div style="height:16px"></div>
+      <h2 style="font-size:16px">🏆 Big goal (optional)</h2>
+      <label class="f"><span>Goal name</span><input type="text" id="g_name" value="${esc(s.goalName)}" placeholder="e.g. First RM 10k"></label>
+      <label class="f"><span>Amount I want (RM)</span><input type="number" inputmode="decimal" id="g_amt" value="${s.goalAmount || ''}" placeholder="e.g. 10000">
+        <div class="hint">Progress counts your cash + savings + investment.</div></label>
+      <label class="f"><span>Reach it by (optional)</span><input type="date" id="g_date" value="${s.goalDate}" min="${addDays(todayStr(), 1)}"></label>
+      <button class="btn" id="t_save">Save targets</button>
+    `);
+    $('#t_rec').onclick = () => { $('#t_daily').value = rec.daily; $('#t_month').value = rec.monthly; $('#t_year').value = rec.yearly; };
+    $('#t_save').onclick = () => {
+      const n = id => { const v = parseFloat($(id).value); return v >= 0 ? r2(v) : 0; };
+      s.dailyBudget = n('#t_daily'); s.monthlyTarget = n('#t_month'); s.yearlyTarget = n('#t_year');
+      s.goalName = $('#g_name').value.trim(); s.goalAmount = n('#g_amt'); s.goalDate = $('#g_date').value || '';
+      save(); closeSheet(); render(); toast('Targets saved ✅');
+    };
   }
 
   function dayStatus(date, budget, t) {
@@ -452,13 +526,13 @@
         <div class="hint">Cash lasts at ${fmt(a.cashPerDay)}/day for ${a.daysUntil} day(s) until ${esc(a.untilLabel)}${a.commitBeforeUntil ? `, after ${fmt(a.commitBeforeUntil)} of commitments` : ''}.</div>`;
     } else if (view0 === 'month') {
       detail = `
-        ${projBox(a.monthProj, `End of ${MONTHS_FULL[a.m]} at your current pace`, s.monthlyTarget > 0 ? targetLine(a.monthProj, s.monthlyTarget) : '')}
+        ${projBox(a.monthProj, `End of ${MONTHS_FULL[a.m]} at your current pace`, a.monthTargetEff > 0 ? targetLine(a.monthProj, a.monthTargetEff) : '')}
         <div class="row"><span>In so far</span><b class="pos">${fmt(a.mo.inc)}</b></div>
         <div class="row"><span>Allowance still expected</span><b class="pos">${fmt(a.expRemIncomeMonth)}</b></div>
         <div class="row"><span>Out so far</span><b class="neg">${fmt(a.mo.exp)}</b></div>
         <div class="row"><span>Est. spending, ${a.daysAfterToday} days left × ${fmt(a.avg.avg)}</span><b class="neg">${fmt(a.avg.avg * a.daysAfterToday)}</b></div>
         <div class="row"><span>Commitments still due</span><b class="neg">${fmt(a.remCommitMonth)}</b></div>
-        ${s.monthlyTarget > 0 ? `<div class="row"><span><b>Max spend/day to hit target</b></span><b class="${a.monthPerDayForTarget >= 0 ? 'pos' : 'neg'}">${a.monthPerDayForTarget >= 0 ? fmt(a.monthPerDayForTarget) : 'Target out of reach ⚠️'}</b></div>` : ''}`;
+        ${a.monthTargetEff > 0 ? `<div class="row"><span><b>Max spend/day to hit target</b></span><b class="${a.monthPerDayForTarget >= 0 ? 'pos' : 'neg'}">${a.monthPerDayForTarget >= 0 ? fmt(a.monthPerDayForTarget) : 'Target out of reach ⚠️'}</b></div>` : ''}`;
     } else {
       detail = `
         ${projBox(a.yearProj, `End of ${a.y} at your current pace`, s.yearlyTarget > 0 ? targetLine(a.yearProj, s.yearlyTarget) : '')}
@@ -489,7 +563,7 @@
         <label class="f"><span>If I spend this much per day (RM, excl. commitments)</span>
           <input type="number" inputmode="decimal" id="whatIf" value="${wi}" min="0" step="1"></label>
         <div id="wiOut">
-          ${projBox(wiMonth, `End of ${MONTHS_FULL[a.m]}`, s.monthlyTarget > 0 ? targetLine(wiMonth, s.monthlyTarget) : '')}
+          ${projBox(wiMonth, `End of ${MONTHS_FULL[a.m]}`, a.monthTargetEff > 0 ? targetLine(wiMonth, a.monthTargetEff) : '')}
           ${projBox(wiYear, `End of ${a.y}`, s.yearlyTarget > 0 ? targetLine(wiYear, s.yearlyTarget) : '')}
           <div class="hint ${runsOut ? 'neg' : ''}">${runsOut
             ? `⚠️ At this pace your cash runs out in about ${Math.max(0, Math.floor(cashDays))} day(s), before ${esc(a.untilLabel)}.`
@@ -583,6 +657,9 @@
           <div class="hint">Recommended: ${fmt(rec.monthly)} (20% of allowance)</div></label>
         <label class="f"><span>Yearly target (RM)</span><input type="number" inputmode="decimal" id="s_yearlyTarget" value="${s.yearlyTarget}">
           <div class="hint">Recommended: ${fmt(rec.yearly)} (${rec.monthsThisYear} month${rec.monthsThisYear > 1 ? 's' : ''} × monthly target)</div></label>
+        <label class="f"><span>🏆 Big goal amount (RM, optional)</span><input type="number" inputmode="decimal" id="s_goalAmount" value="${s.goalAmount || ''}" placeholder="e.g. 10000"></label>
+        <label class="f"><span>Goal name</span><input type="text" id="s_goalName" value="${esc(s.goalName)}" placeholder="e.g. First RM 10k"></label>
+        <label class="f"><span>Reach goal by (optional)</span><input type="date" id="s_goalDate" value="${s.goalDate}"></label>
         <button class="btn secondary" id="useRec">Use recommended targets</button>
         <div class="hint">Recommended = 50/30/20 rule: save 20% of your allowance, take out fixed commitments, and split the rest across 30 days.</div>
       </div>
@@ -610,7 +687,7 @@
         <input type="file" id="importFile" accept="application/json,.json" style="display:none">
         <button class="btn danger" id="resetBtn" style="margin-top:10px">Erase everything</button>
       </div>
-      <div class="hint" style="text-align:center;margin-top:8px">v1.0 · ${state.tx.length} entries</div>
+      <div class="hint" style="text-align:center;margin-top:8px">v1.1 · ${state.tx.length} entries</div>
     `;
   }
 
@@ -744,9 +821,10 @@
   $('#fab').addEventListener('click', () => openAdd(currentTab === 'calendar' && renderCalendar.selected ? renderCalendar.selected : undefined));
 
   view.addEventListener('click', e => {
-    const el = e.target.closest('[data-del],[data-goto],[data-calmode],[data-cal],[data-caly],[data-day],[data-month],[data-year],[data-period],[data-sm],[data-delc],#useRec,#addCommit,#saveSettings,#exportBtn,#importBtn,#resetBtn');
+    const el = e.target.closest('[data-open],[data-del],[data-goto],[data-calmode],[data-cal],[data-caly],[data-day],[data-month],[data-year],[data-period],[data-sm],[data-delc],#useRec,#addCommit,#saveSettings,#exportBtn,#importBtn,#resetBtn');
     if (!el) return;
     const d = el.dataset;
+    if (d.open === 'targets') { openTargets(); return; }
     if (d.del) {
       const x = state.tx.find(t => t.id === d.del);
       confirmSheet(`Delete this ${x && x.type === 'income' ? 'income' : 'entry'} of ${x ? fmt(x.amount) : ''}?`, 'Delete', () => {
@@ -770,7 +848,7 @@
       readSettingsForm();
       const r = recommended();
       $('#s_dailyBudget').value = r.daily; $('#s_monthlyTarget').value = r.monthly; $('#s_yearlyTarget').value = r.yearly;
-      toast('Filled in — tap Save settings');
+      readSettingsForm(); save(); toast('Recommended targets saved ✅');
     }
     else if (el.id === 'addCommit') {
       const name = $('#c_name').value.trim(), amount = parseFloat($('#c_amount').value), day = parseInt($('#c_day').value, 10);
@@ -799,6 +877,8 @@
   });
 
   view.addEventListener('change', e => {
+    // Settings auto-save: no need to scroll down to the Save button
+    if (e.target.id && e.target.id.startsWith('s_')) { readSettingsForm(); save(); toast('Saved ✅'); return; }
     if (e.target.id === 'importFile' && e.target.files[0]) {
       const fr = new FileReader();
       fr.onload = () => {
@@ -829,6 +909,9 @@
     set('dailyBudget', num('#s_dailyBudget'));
     set('monthlyTarget', num('#s_monthlyTarget'));
     set('yearlyTarget', num('#s_yearlyTarget'));
+    set('goalAmount', num('#s_goalAmount'));
+    if ($('#s_goalName')) s.goalName = $('#s_goalName').value.trim();
+    if ($('#s_goalDate')) s.goalDate = $('#s_goalDate').value;
   }
 
   function exportData() {
