@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="theme-color" content="#0f1115">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Millionaire">
+  <title>How To Be A Millionaire</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">💰 Millionaire</div>
+    <div class="today-label" id="todayLabel"></div>
+  </header>
+
+  <main id="view"></main>
+
+  <button class="fab" id="fab" aria-label="Add entry">+</button>
+
+  <nav class="tabbar">
+    <button data-tab="home" class="active"><span>🏠</span>Home</button>
+    <button data-tab="calendar"><span>📅</span>Calendar</button>
+    <button data-tab="calc"><span>🧮</span>Calculator</button>
+    <button data-tab="stats"><span>📊</span>Stats</button>
+    <button data-tab="settings"><span>⚙️</span>Settings</button>
+  </nav>
+
+  <div class="sheet-backdrop" id="backdrop"></div>
+  <section class="sheet" id="sheet" aria-modal="true" role="dialog"></section>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
